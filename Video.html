@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clean Custom Player</title>
+    
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z'/></svg>">
+
+    <style>
+        * { 
+            margin: 0; padding: 0; box-sizing: border-box; 
+            user-select: none; -webkit-user-select: none; 
+        }
+
+        body, html { 
+            width: 100%; height: 100%; overflow: hidden; 
+            background: #000; font-family: sans-serif; 
+        }
+
+        .player {
+            width: 100vw; height: 100vh; position: relative;
+            display: flex; justify-content: center; align-items: center;
+            cursor: default;
+        }
+
+        .hide-cursor { cursor: none; }
+        video { width: 100%; height: 100%; object-fit: contain; display: none; }
+
+        .upload-screen { color: white; text-align: center; z-index: 20; padding: 50px; }
+        .upload-btn {
+            background: #333; color: white; padding: 15px 30px;
+            border-radius: 5px; border: 1px solid #555; cursor: pointer;
+        }
+
+        .controls {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(50, 50, 50, 0.6);
+            z-index: 10; pointer-events: none; opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.4s ease, transform 0.4s ease;
+        }
+
+        .show-controls { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+        .progress-container {
+            width: 100%; height: 4px; background: rgba(255, 255, 255, 0.15);
+            cursor: pointer; position: relative;
+            transition: height 0.2s ease, opacity 0.3s ease, transform 0.3s ease;
+            opacity: 1;
+        }
+        
+        .progress-hidden {
+            opacity: 0;
+            pointer-events: none;
+            height: 0px !important;
+            transform: translateY(5px);
+        }
+
+        .progress-container:hover:not(.progress-hidden) { height: 8px; }
+
+        .progress-bar {
+            width: 0%; height: 100%; background: #fff;
+            will-change: width;
+        }
+
+        .controls-main {
+            padding: 15px 40px 20px 40px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+
+        .btn-group { display: flex; gap: 20px; align-items: center; }
+        button { background: none; border: none; cursor: pointer; display: flex; align-items: center; outline: none; }
+        svg { fill: white; width: 30px; height: 30px; }
+        button:hover svg { fill: #ccc; }
+        
+        #fileInput { display: none; }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+<div class="player" id="videoContainer">
+    <div class="upload-screen" id="uploadScreen">
+        <button class="upload-btn" id="initialUploadBtn">Select Video File</button>
+        <input type="file" id="fileInput" accept="video/*">
+    </div>
+
+    <video id="myVideo"></video>
+    
+    <div class="controls" id="controlsBar">
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+
+        <div class="controls-main">
+            <div class="btn-group">
+                <button id="playBtn">
+                    <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    <svg id="restartIcon" viewBox="0 0 24 24" style="display:none;"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+                </button>
+                <button id="navUploadBtn">
+                    <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
+                </button>
+                <button id="pipBtn">
+                    <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
+                </button>
+            </div>
+            <button id="fsBtn">
+                <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('myVideo');
+    const playBtn = document.getElementById('playBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const restartIcon = document.getElementById('restartIcon');
+    const controls = document.getElementById('controlsBar');
+    const container = document.getElementById('videoContainer');
+    const fileInput = document.getElementById('fileInput');
+    const uploadScreen = document.getElementById('uploadScreen');
+    const progressBar = document.getElementById('progressBar');
+    const progressContainer = document.getElementById('progressContainer');
+    const pipBtn = document.getElementById('pipBtn');
+
+    let timeout;
+    let isFinished = false;
+    let wasPlayingBeforeUpload = false;
+
+    document.onkeydown = (e) => {
+        if (e.keyCode == 32) { e.preventDefault(); togglePlay(); }
+    };
+
+    function loadVideo(file) {
+        if (file) {
+            video.src = URL.createObjectURL(file);
+            video.style.display = 'block';
+            uploadScreen.style.display = 'none';
+            isFinished = false;
+            video.play();
+            showUI();
+            requestAnimationFrame(updateSmoothProgress);
+        }
+    }
+
+    fileInput.onchange = (e) => {
+        if (e.target.files.length > 0) loadVideo(e.target.files[0]);
+    };
+
+    window.addEventListener('focus', () => {
+        setTimeout(() => {
+            if (wasPlayingBeforeUpload && video.src && video.paused && !isFinished) {
+                video.play();
+            }
+            wasPlayingBeforeUpload = false; 
+        }, 300);
+    });
+
+    // FIXED: Removed the paused check so it updates while seeking too
+    function updateSmoothProgress() {
+        if (video.src && !video.ended) {
+            const percent = (video.currentTime / video.duration) * 100;
+            progressBar.style.width = percent + '%';
+        }
+        requestAnimationFrame(updateSmoothProgress);
+    }
+
+    // Force update when seeking while paused
+    video.onseeked = () => {
+        const percent = (video.currentTime / video.duration) * 100;
+        progressBar.style.width = percent + '%';
+    };
+
+    progressContainer.onclick = (e) => {
+        if (!video.src || isFinished) return; 
+        const rect = progressContainer.getBoundingClientRect();
+        const pos = (e.pageX - rect.left) / rect.width;
+        video.currentTime = pos * video.duration;
+        isFinished = false;
+        updateIcons();
+    };
+
+    function updateIcons() {
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'none';
+        restartIcon.style.display = 'none';
+
+        if (isFinished) {
+            restartIcon.style.display = 'block';
+            progressContainer.classList.add('progress-hidden'); 
+        } else {
+            progressContainer.classList.remove('progress-hidden'); 
+            if (video.paused) playIcon.style.display = 'block';
+            else pauseIcon.style.display = 'block';
+        }
+    }
+
+    function togglePlay() {
+        if (!video.src) return;
+        if (isFinished) {
+            isFinished = false; 
+            video.currentTime = 0; 
+            video.play();
+        } else {
+            video.paused ? video.play() : video.pause();
+        }
+        updateIcons();
+    }
+
+    function showUI() {
+        if(!video.src) return;
+        controls.classList.add('show-controls');
+        container.classList.remove('hide-cursor');
+        clearTimeout(timeout);
+        if (!video.paused && !isFinished) timeout = setTimeout(hideUI, 3000);
+    }
+
+    function hideUI() {
+        if (!video.paused && !isFinished) {
+            controls.classList.remove('show-controls');
+            container.classList.add('hide-cursor');
+        }
+    }
+
+    video.onended = () => { isFinished = true; updateIcons(); showUI(); };
+    video.onplay = () => { isFinished = false; updateIcons(); showUI(); };
+    video.onpause = () => { updateIcons(); showUI(); };
+    
+    const handleUploadClick = (e) => {
+        e.stopPropagation();
+        wasPlayingBeforeUpload = !video.paused && !isFinished && video.src !== "";
+        video.pause(); 
+        fileInput.click();
+    };
+
+    pipBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+            if (video !== document.pictureInPictureElement) {
+                await video.requestPictureInPicture();
+            } else {
+                await document.exitPictureInPicture();
+            }
+        } catch (error) { console.error("PiP failed", error); }
+    };
+
+    document.getElementById('initialUploadBtn').onclick = handleUploadClick;
+    document.getElementById('navUploadBtn').onclick = handleUploadClick;
+    playBtn.onclick = (e) => { e.stopPropagation(); togglePlay(); };
+    video.onclick = togglePlay;
+    container.onmousemove = showUI;
+    
+    document.getElementById('fsBtn').onclick = (e) => {
+        e.stopPropagation();
+        if (!document.fullscreenElement) container.requestFullscreen();
+        else document.exitFullscreen();
+    };
+</script>
+</body>
+</html>
